@@ -224,7 +224,7 @@ class CodeEditor(QPlainTextEdit):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("XSLT Debugger")
+        self.setWindowTitle("XSLT Tester")
         self.setWindowIcon(QIcon(resource_path("src/main/python/icon.ico")))
         self.resize(1024, 768)
         
