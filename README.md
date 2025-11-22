@@ -45,5 +45,5 @@ To build and run this application from the source code, follow these steps:
 
 ## Releases
 
-Pre-built binaries for Windows are available on the [**Releases**](https://github.com/your-username/your-repository/releases) page of this repository.
+Pre-built binaries for Windows are available on the [**Releases**](https://github.com/mmuo3i3q3x7or8hj3326/XSLT_Tester/releases) page of this repository.
 
