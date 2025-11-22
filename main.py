@@ -160,7 +160,7 @@ class CodeEditor(QPlainTextEdit):
             context_menu = QMenu(self)
             format_action = context_menu.addAction("Format")
             format_action.triggered.connect(self.pretty_print_xml)
-            context_menu.exec_(self.mapToGlobal(position))
+            context_menu.exec(self.mapToGlobal(position))
             
     def highlightCurrentLine(self):
         extraSelections = []
@@ -179,52 +179,26 @@ class CodeEditor(QPlainTextEdit):
 
     def pretty_print_xml(self):
         try:
-            import re
             cursor = self.textCursor()
             original_pos = cursor.position()
             original_text = self.toPlainText()
-            
+
             if not original_text.strip():
                 return
-            
-            # A quick lxml parse to validate the XML before attempting to format.
-            # This prevents the formatter from running on malformed documents.
-            etree.fromstring(original_text.encode('utf-8'))
 
-            formatted_lines = []
-            indent_level = 0
-            indent_str = "    "
+            # Use a placeholder to preserve the &#10; entity
+            placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
+            text_with_placeholder = original_text.replace("&#10;", placeholder)
 
-            # Regex to find opening tags (and not comments/PIs)
-            opening_tag_regex = re.compile(r'<([a-zA-Z0-9_:]+)')
-            closing_tag_regex = re.compile(r'</')
+            # Use lxml to parse and re-serialize with pretty printing
+            parser = etree.XMLParser(remove_blank_text=True, recover=True)
+            root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
 
-            for line in original_text.splitlines():
-                stripped_line = line.strip()
-                
-                if not stripped_line:
-                    formatted_lines.append("")
-                    continue
+            # Use lxml's built-in pretty printing
+            formatted_xml_with_placeholder = etree.tostring(root, pretty_print=True, encoding='unicode')
 
-                # Default delta is 0 for comments, PIs, text, self-closing tags, etc.
-                delta = 0
-                if stripped_line.startswith('<') and not stripped_line.startswith('<!--') and not stripped_line.startswith('<?') and not stripped_line.endswith('/>'):
-                    openers = len(opening_tag_regex.findall(stripped_line))
-                    closers = len(closing_tag_regex.findall(stripped_line))
-                    delta = openers - closers
-
-                # Decrease indent level if the line's net effect is closing
-                if delta < 0:
-                    indent_level += delta
-                
-                # Append the line with the current indentation level
-                formatted_lines.append(indent_str * indent_level + stripped_line)
-                
-                # Increase indent level if the line's net effect is opening
-                if delta > 0:
-                    indent_level += delta
-            
-            final_xml = "\n".join(formatted_lines)
+            # Restore the &#10; entity
+            final_xml = formatted_xml_with_placeholder.replace(placeholder, "&#10;")
 
             if original_text.strip() != final_xml.strip():
                 self.setPlainText(final_xml)
@@ -232,7 +206,7 @@ class CodeEditor(QPlainTextEdit):
 
             cursor.setPosition(original_pos)
             self.setTextCursor(cursor)
-            
+
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
                 main_window.statusBar().showMessage("Formatted successfully.", 2000)
