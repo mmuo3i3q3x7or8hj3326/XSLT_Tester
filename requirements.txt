@@ -1,0 +1,5 @@
+PySide6==6.10.1
+saxonche==12.9.0
+Pygments==2.19.2
+lxml==6.0.2
+darkdetect==0.8.0

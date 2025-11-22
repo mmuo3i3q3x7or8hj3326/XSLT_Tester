@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Installer files
+python-installer.exe
+
+# Project history
+project_history.json
+
+# IDE specific
+.idea/
+.vscode/
+
+# Archives
+*.zip
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build scripts
+build.bat
+
+# no longer necessary svg icon file
+icon.svg
