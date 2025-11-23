@@ -2,8 +2,7 @@
 
 A simple, standalone desktop application for XSLT development and transformation testing.
 
-
-![alt text](Screenshot 2025-11-22 200750.png "Logo Title Text 1")
+![XSLT_Tester](https://raw.githubusercontent.com/mmuo3i3q3x7or8hj3326/XSLT_Tester/refs/heads/main/Screenshot%202025-11-22%20200750.png)
 
 ## Features
 -   XPath copy pasting
