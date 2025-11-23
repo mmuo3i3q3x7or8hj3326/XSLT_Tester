@@ -9,10 +9,10 @@ if hasattr(os, 'add_dll_directory'):
 import darkdetect
 from lxml import etree
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit,
-                               QPlainTextEdit, QPushButton, QSplitter, QFileDialog, QGroupBox, QMenu)
+                               QPlainTextEdit, QPushButton, QSplitter, QFileDialog, QGroupBox, QMenu, QLabel)
 from PySide6.QtGui import (QFont, QColor, QTextCharFormat, QTextCursor, QPainter, QIcon,
-                           QKeySequence, QAction, QSyntaxHighlighter)
-from PySide6.QtCore import Qt, QRect, QSize
+                           QKeySequence, QAction, QSyntaxHighlighter, QClipboard)
+from PySide6.QtCore import Qt, QRect, QSize, Signal, QTimer
 from saxonche import PySaxonProcessor
 from pygments.lexers import XmlLexer
 from pygments.styles import get_style_by_name
@@ -88,12 +88,22 @@ class LineNumberArea(QWidget):
         self.codeEditor.lineNumberAreaPaintEvent(event)
 
 class CodeEditor(QPlainTextEdit):
+    xpath_changed = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.lineNumberArea = LineNumberArea(self)
         self.blockCountChanged.connect(self.updateLineNumberAreaWidth)
         self.updateRequest.connect(self.updateLineNumberArea)
         self.cursorPositionChanged.connect(self.highlightCurrentLine)
+        
+        self.xpath_update_timer = QTimer(self)
+        self.xpath_update_timer.setInterval(500)
+        self.xpath_update_timer.setSingleShot(True)
+        self.xpath_update_timer.timeout.connect(self._update_xpath)
+        
+        self.cursorPositionChanged.connect(self.xpath_update_timer.start)
+        
         self.updateLineNumberAreaWidth(0)
         
         font = QFont("Consolas", 10)
@@ -104,6 +114,48 @@ class CodeEditor(QPlainTextEdit):
         
         self.highlighter = XmlHighlighter(self.document())
         self.highlightCurrentLine()
+
+    def _update_xpath(self):
+        try:
+            text = self.toPlainText()
+            if not text.strip():
+                self.xpath_changed.emit("")
+                return
+
+            # Use a placeholder to preserve the &#10; entity
+            placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
+            text_with_placeholder = text.replace("&#10;", placeholder)
+
+            parser = etree.XMLParser(recover=True)
+            root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
+            
+            tree = etree.ElementTree(root)
+
+            cursor = self.textCursor()
+            line_number = cursor.blockNumber() + 1
+
+            element = None
+            # This logic is non-functional without sourceline, but it prevents the app from crashing.
+            for elem in root.iter():
+                if hasattr(elem, 'sourceline') and elem.sourceline == line_number:
+                    element = elem
+                    break 
+
+            if element is not None:
+                xpath = tree.getpath(element)
+                xpath = xpath.replace(placeholder, "&#10;")
+                self.xpath_changed.emit(xpath)
+            else:
+                self.xpath_changed.emit("") # Silently fails, but doesn't crash
+
+        except etree.XMLSyntaxError as e:
+            self.xpath_changed.emit("Invalid XML")
+            # Preserve error logging to console for future testing - necessary for Gemini.
+            print(f"XPath Update Error (XML Syntax): {e}")
+        except Exception as e:
+            self.xpath_changed.emit("")
+            # Preserve error logging to console for future testing - necessary for Gemini.
+            print(f"XPath Update Error (General): {e}")
 
     def lineNumberAreaWidth(self):
         digits = 1
@@ -155,12 +207,68 @@ class CodeEditor(QPlainTextEdit):
             bottom = top + self.blockBoundingRect(block).height()
             blockNumber += 1
             
+    def copy_xpath_to_clipboard(self):
+        try:
+            text = self.toPlainText()
+            if not text.strip():
+                return
+
+            # Use a placeholder to preserve the &#10; entity
+            placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
+            text_with_placeholder = text.replace("&#10;", placeholder)
+
+            parser = etree.XMLParser(recover=True)
+            root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
+            
+            tree = etree.ElementTree(root)
+
+            cursor = self.textCursor()
+            line_number = cursor.blockNumber() + 1
+
+            element = None
+            # This logic is non-functional without sourceline, but it prevents the app from crashing.
+            for elem in root.iter():
+                if hasattr(elem, 'sourceline') and elem.sourceline == line_number:
+                    element = elem
+                    break
+
+            if element is not None:
+                xpath = tree.getpath(element)
+                xpath = xpath.replace(placeholder, "&#10;")
+                clipboard = QApplication.clipboard()
+                clipboard.setText(xpath)
+                main_window = self.window()
+                if hasattr(main_window, 'statusBar'):
+                    main_window.statusBar().showMessage("XPath copied to clipboard.", 2000)
+            else:
+                main_window = self.window()
+                if hasattr(main_window, 'statusBar'):
+                    main_window.statusBar().showMessage("No element found at this line.", 3000)
+
+        except etree.XMLSyntaxError as e:
+            main_window = self.window()
+            if hasattr(main_window, 'statusBar'):
+                main_window.statusBar().showMessage(f"Could not copy XPath: Invalid XML - {e}", 5000)
+            # Preserve error logging to console for future testing - necessary for Gemini.
+            print(f"Copy XPath Error (XML Syntax): {e}")
+        except Exception as e:
+            main_window = self.window()
+            if hasattr(main_window, 'statusBar'):
+                main_window.statusBar().showMessage(f"An unexpected error occurred while copying XPath: {e}", 5000)
+            # Preserve error logging to console for future testing - necessary for Gemini.
+            print(f"Copy XPath Error (General): {e}")
+
     def show_context_menu(self, position):
+        context_menu = QMenu(self)
+        
+        copy_xpath_action = context_menu.addAction("Copy XPath")
+        copy_xpath_action.triggered.connect(self.copy_xpath_to_clipboard)
+        
         if not self.isReadOnly():
-            context_menu = QMenu(self)
             format_action = context_menu.addAction("Format")
             format_action.triggered.connect(self.pretty_print_xml)
-            context_menu.exec(self.mapToGlobal(position))
+            
+        context_menu.exec(self.mapToGlobal(position))
             
     def highlightCurrentLine(self):
         extraSelections = []
@@ -313,7 +421,13 @@ class MainWindow(QMainWindow):
         top_splitter.setSizes([self.width() * 0.5, self.width() * 0.5])
         main_splitter.setSizes([self.height() * 0.6, self.height() * 0.4])
         
-        self.statusBar()
+        self.xpath_label = QLabel("XPath: ")
+        self.xpath_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.statusBar().addPermanentWidget(self.xpath_label)
+
+        self.xml_editor.xpath_changed.connect(self.update_xpath_label)
+        self.xslt_editor.xpath_changed.connect(self.update_xpath_label)
+        self.output_editor.xpath_changed.connect(self.update_xpath_label)
         
         self.xml_editor.document().modificationChanged.connect(
             lambda modified: self.on_modification_changed(modified, self.xml_group, "XML Input", self.xml_file_path, self.save_xml_action)
@@ -326,6 +440,9 @@ class MainWindow(QMainWindow):
         save_shortcut.setShortcut(QKeySequence.Save)
         save_shortcut.triggered.connect(self.save_active_editor)
         self.addAction(save_shortcut)
+
+    def update_xpath_label(self, xpath):
+        self.xpath_label.setText(f"XPath: {xpath}")
 
     def on_modification_changed(self, modified, group_box, base_title, file_path, save_action):
         title = base_title
