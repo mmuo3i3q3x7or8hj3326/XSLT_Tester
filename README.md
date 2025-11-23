@@ -3,9 +3,10 @@
 A simple, standalone desktop application for XSLT development and transformation testing.
 
 ## Features
--   Dark Theme if detects Windows Dark Mode
+-   XPath copy pasting
 -   Right-click > Format: Pretty-printing for XML/XSLT.
 -   No word-wrapping for readability.
+-   Dark Theme if detects Windows Dark Mode
 
 ## Building from Source
 
