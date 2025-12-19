@@ -3,7 +3,7 @@
 A simple, standalone desktop application for XSLT development and transformation testing.
 
 
-![Sample image of the app running in Dark Mode](screenshot.png "Screenshot")
+![XSLT_Tester](https://raw.githubusercontent.com/mmuo3i3q3x7or8hj3326/XSLT_Tester/refs/heads/main/Screenshot%202025-11-22%20200750.png "Sample image of the app running in Dark Mode")
 
 ## Features
 -   XPath copy pasting
