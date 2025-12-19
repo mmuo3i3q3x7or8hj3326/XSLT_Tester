@@ -3,7 +3,7 @@
 A simple, standalone desktop application for XSLT development and transformation testing.
 
 
-![alt text](Screenshot 2025-11-22 200750.png "Logo Title Text 1")
+![Sample image of the app running in Dark Mode](screenshot.png "Screenshot")
 
 ## Features
 -   XPath copy pasting
