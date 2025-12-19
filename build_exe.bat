@@ -1,0 +1,1 @@
+pyinstaller --onefile --windowed --name XSLT_Tester --icon="icon.ico" --add-data="icon.ico;." main.py

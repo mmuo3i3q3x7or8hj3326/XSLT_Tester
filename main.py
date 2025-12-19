@@ -9,14 +9,194 @@ if hasattr(os, 'add_dll_directory'):
 import darkdetect
 from lxml import etree
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit,
-                               QPlainTextEdit, QPushButton, QSplitter, QFileDialog, QGroupBox, QMenu, QLabel)
+                               QPlainTextEdit, QPushButton, QSplitter, QFileDialog, QGroupBox, QMenu, QLabel,
+                               QLineEdit)
 from PySide6.QtGui import (QFont, QColor, QTextCharFormat, QTextCursor, QPainter, QIcon,
-                           QKeySequence, QAction, QSyntaxHighlighter, QClipboard)
-from PySide6.QtCore import Qt, QRect, QSize, Signal, QTimer
+                           QKeySequence, QAction, QSyntaxHighlighter, QClipboard, QTextDocument, QShortcut)
+from PySide6.QtCore import Qt, QRect, QSize, Signal, QTimer, QRegularExpression
 from saxonche import PySaxonProcessor
 from pygments.lexers import XmlLexer
 from pygments.styles import get_style_by_name
 from pygments.token import Token
+
+class SearchReplaceWidget(QWidget):
+    def __init__(self, editor):
+        super().__init__(editor)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.editor = editor
+        self.setFocusProxy(self)
+        self.setVisible(False)
+
+        self.find_input = QLineEdit()
+        self.replace_input = QLineEdit()
+        self.find_input.setPlaceholderText("Find")
+        self.replace_input.setPlaceholderText("Replace")
+
+        self.close_button = QPushButton("X")
+        
+        self.case_sensitive_button = QPushButton("Aa")
+        self.case_sensitive_button.setCheckable(True)
+        self.case_sensitive_button.setToolTip("Case Sensitive")
+        self.whole_word_button = QPushButton("W")
+        self.whole_word_button.setCheckable(True)
+        self.whole_word_button.setToolTip("Whole Words")
+        self.regex_button = QPushButton(".*")
+        self.regex_button.setCheckable(True)
+        self.regex_button.setToolTip("Use Regular Expression")
+
+        self.case_sensitive_button.toggled.connect(lambda checked: self.update_button_style(self.case_sensitive_button, checked))
+        self.whole_word_button.toggled.connect(lambda checked: self.update_button_style(self.whole_word_button, checked))
+        self.regex_button.toggled.connect(lambda checked: self.update_button_style(self.regex_button, checked))
+
+        self.replace_button = QPushButton("Replace")
+        self.replace_all_button = QPushButton("Replace All")
+
+        self.close_button.clicked.connect(self.close_widget)
+        self.close_button.setToolTip("Close (Esc)")
+        self.find_input.textChanged.connect(self.editor.highlight_all_matches)
+        self.find_input.returnPressed.connect(self.find_next)
+        self.replace_input.returnPressed.connect(self.replace_current)
+        self.replace_button.clicked.connect(self.replace_current)
+        self.replace_all_button.clicked.connect(self.replace_all)
+
+        #Layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
+
+        find_layout = QHBoxLayout()
+        find_layout.addWidget(self.find_input)
+        find_layout.addWidget(self.case_sensitive_button)
+        find_layout.addWidget(self.whole_word_button)
+        find_layout.addWidget(self.regex_button)
+        find_layout.addWidget(self.close_button)
+
+        replace_layout = QHBoxLayout()
+        replace_layout.addWidget(self.replace_input)
+        replace_layout.addWidget(self.replace_button)
+        replace_layout.addWidget(self.replace_all_button)
+
+        main_layout.addLayout(find_layout)
+        main_layout.addLayout(replace_layout)
+
+        self.setLayout(main_layout)
+        self.setStyleSheet("""
+            SearchReplaceWidget {
+                background-color: rgba(50, 50, 50, 0.9);
+                border: 1px solid #555;
+                border-radius: 5px;
+            }
+            QLineEdit {
+                border: 1px solid #555;
+                padding: 4px;
+                background-color: #222;
+                color: #ddd;
+            }
+            QPushButton {
+                background-color: #555;
+                color: #ddd;
+                border: none;
+                padding: 4px 8px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #666;
+            }
+            QPushButton:pressed {
+                background-color: #777;
+            }
+        """)
+
+    def close_widget(self):
+        self.hide()
+        self.editor.setFocus()
+        
+    def update_button_style(self, button, checked):
+        if checked:
+            button.setStyleSheet("""
+                background-color: #007ACC;
+                border: 1px solid #00568f;
+                padding: 4px 8px;
+                border-radius: 3px;
+            """)
+        else:
+            button.setStyleSheet("""
+                background-color: #555;
+                border: 1px solid #555;
+                padding: 4px 8px;
+                border-radius: 3px;
+            """)
+
+    def show_widget(self, replace=False):
+        if self.isVisible() and replace:
+            self.replace_input.setVisible(True)
+            self.replace_button.setVisible(True)
+            self.replace_all_button.setVisible(True)
+        else:
+            self.setVisible(True)
+            self.replace_input.setVisible(replace)
+            self.replace_button.setVisible(replace)
+            self.replace_all_button.setVisible(replace)
+        
+        self.find_input.setFocus()
+        self.adjustSize()
+        self.move(self.editor.viewport().width() - self.width() - 10, 10)
+
+    def find_next(self):
+        query = self.find_input.text()
+        if self.regex_button.isChecked():
+            options = QRegularExpression.NoPatternOption
+            if not self.case_sensitive_button.isChecked():
+                options |= QRegularExpression.CaseInsensitiveOption
+            regex = QRegularExpression(query, options)
+            if not regex.isValid(): return
+            if not self.editor.find(regex):
+                # Wrap search to the beginning
+                self.editor.moveCursor(QTextCursor.Start)
+                self.editor.find(regex)
+        else:
+            if not self.editor.find(query, self._get_find_flags()):
+                # Wrap search to the beginning
+                self.editor.moveCursor(QTextCursor.Start)
+                self.editor.find(query, self._get_find_flags())
+
+    def find_prev(self):
+        query = self.find_input.text()
+        find_flags = QTextDocument.FindBackward
+        if self.regex_button.isChecked():
+            options = QRegularExpression.NoPatternOption
+            if not self.case_sensitive_button.isChecked():
+                options |= QRegularExpression.CaseInsensitiveOption
+            regex = QRegularExpression(query, options)
+            if not regex.isValid(): return
+            if not self.editor.find(regex, find_flags):
+                # Wrap search to the end
+                self.editor.moveCursor(QTextCursor.End)
+                self.editor.find(regex, find_flags)
+        else:
+            find_flags |= self._get_find_flags()
+            if not self.editor.find(query, find_flags):
+                # Wrap search to the end
+                self.editor.moveCursor(QTextCursor.End)
+                self.editor.find(query, find_flags)
+
+    def replace_current(self):
+        if self.editor.textCursor().hasSelection():
+            self.editor.textCursor().insertText(self.replace_input.text())
+        self.find_next()
+
+    def replace_all(self):
+        self.editor.moveCursor(QTextCursor.Start)
+        while self.editor.find(self.find_input.text(), self._get_find_flags()):
+            self.editor.textCursor().insertText(self.replace_input.text())
+            
+    def _get_find_flags(self):
+        flags = QTextDocument.FindFlags()
+        if self.case_sensitive_button.isChecked():
+            flags |= QTextDocument.FindCaseSensitively
+        if self.whole_word_button.isChecked():
+            flags |= QTextDocument.FindWholeWords
+        return flags
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -97,6 +277,8 @@ class CodeEditor(QPlainTextEdit):
         self.updateRequest.connect(self.updateLineNumberArea)
         self.cursorPositionChanged.connect(self.highlightCurrentLine)
         
+        self.search_widget = SearchReplaceWidget(self)
+        
         self.xpath_update_timer = QTimer(self)
         self.xpath_update_timer.setInterval(500)
         self.xpath_update_timer.setSingleShot(True)
@@ -114,6 +296,59 @@ class CodeEditor(QPlainTextEdit):
         
         self.highlighter = XmlHighlighter(self.document())
         self.highlightCurrentLine()
+
+    def keyPressEvent(self, event):
+        if self.search_widget.isVisible() and self.search_widget.find_input.hasFocus():
+            if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                if event.modifiers() == Qt.ShiftModifier:
+                    self.search_widget.find_prev()
+                else:
+                    self.search_widget.find_next()
+                return
+        super().keyPressEvent(event)
+        
+    def show_search_widget(self, replace=False):
+        self.search_widget.show_widget(replace)
+
+    def highlight_all_matches(self, text):
+        extra_selections = []
+        if not text:
+            self.setExtraSelections(extra_selections)
+            return
+
+        document_cursor = QTextCursor(self.document())
+
+        if self.search_widget.regex_button.isChecked():
+            options = QRegularExpression.NoPatternOption
+            if not self.search_widget.case_sensitive_button.isChecked():
+                options |= QRegularExpression.CaseInsensitiveOption
+            regex = QRegularExpression(text, options)
+            if not regex.isValid():
+                 self.setExtraSelections(extra_selections)
+                 return
+            
+            while not document_cursor.isNull() and not document_cursor.atEnd():
+                document_cursor = self.document().find(regex, document_cursor)
+                if not document_cursor.isNull():
+                    selection = QTextEdit.ExtraSelection()
+                    selection.format.setBackground(QColor("#FFA500")) # Orange highlight for regex
+                    selection.cursor = document_cursor
+                    extra_selections.append(selection)
+                else:
+                    break
+        else:
+            flags = self.search_widget._get_find_flags()
+            while not document_cursor.isNull() and not document_cursor.atEnd():
+                document_cursor = self.document().find(text, document_cursor, flags)
+                if not document_cursor.isNull():
+                    selection = QTextEdit.ExtraSelection()
+                    selection.format.setBackground(QColor("yellow"))
+                    selection.cursor = document_cursor
+                    extra_selections.append(selection)
+                else:
+                    break
+
+        self.setExtraSelections(extra_selections)
 
     def _update_xpath(self):
         try:
@@ -181,6 +416,7 @@ class CodeEditor(QPlainTextEdit):
         super().resizeEvent(event)
         cr = self.contentsRect()
         self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+        self.search_widget.move(self.viewport().width() - self.search_widget.width() - 10, 10)
 
     def lineNumberAreaPaintEvent(self, event):
         painter = QPainter(self.lineNumberArea)
@@ -261,6 +497,14 @@ class CodeEditor(QPlainTextEdit):
     def show_context_menu(self, position):
         context_menu = QMenu(self)
         
+        find_action = context_menu.addAction("Find...")
+        find_action.triggered.connect(self.show_search_widget)
+        
+        replace_action = context_menu.addAction("Replace...")
+        replace_action.triggered.connect(lambda: self.show_search_widget(replace=True))
+
+        context_menu.addSeparator()
+        
         copy_xpath_action = context_menu.addAction("Copy XPath")
         copy_xpath_action.triggered.connect(self.copy_xpath_to_clipboard)
         
@@ -333,7 +577,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("XSLT Tester")
-        self.setWindowIcon(QIcon(resource_path("src/main/python/icon.ico")))
+        self.setWindowIcon(QIcon(resource_path("icon.ico")))
         self.resize(1024, 768)
         
         self.xml_file_path = None
@@ -381,6 +625,26 @@ class MainWindow(QMainWindow):
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        edit_menu = self.menu_bar.addMenu("&Edit")
+        self.find_action = QAction("Find...", self)
+        self.replace_action = QAction("Replace...", self)
+        self.copy_xpath_action = QAction("Copy XPath", self)
+        self.format_action = QAction("Format", self)
+        
+        edit_menu.addAction(self.find_action)
+        edit_menu.addAction(self.replace_action)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.copy_xpath_action)
+        edit_menu.addAction(self.format_action)
+
+        self.find_action.triggered.connect(self.find_in_active_editor)
+        self.replace_action.triggered.connect(self.replace_in_active_editor)
+        self.copy_xpath_action.triggered.connect(self.copy_xpath_in_active_editor)
+        self.format_action.triggered.connect(self.format_in_active_editor)
+
+        QApplication.instance().focusChanged.connect(self.handle_focus_change)
+        self.handle_focus_change(None, None) # Set initial state
 
         transform_button = QPushButton("Transform")
         transform_button.clicked.connect(self.transform)
@@ -440,6 +704,69 @@ class MainWindow(QMainWindow):
         save_shortcut.setShortcut(QKeySequence.Save)
         save_shortcut.triggered.connect(self.save_active_editor)
         self.addAction(save_shortcut)
+
+        find_action = QAction("Find", self)
+        find_action.setShortcut(QKeySequence.Find)
+        find_action.triggered.connect(self.show_search_widget_for_active_editor)
+        self.addAction(find_action)
+
+        replace_action = QAction("Replace", self)
+        replace_action.setShortcut(QKeySequence.Replace)
+        replace_action.triggered.connect(lambda: self.show_search_widget_for_active_editor(replace=True))
+        self.addAction(replace_action)
+
+    def _get_active_editor(self):
+        widget = QApplication.focusWidget()
+        if isinstance(widget, CodeEditor):
+            return widget
+        # Check parent if the viewport or another child widget has focus
+        if isinstance(widget, QWidget) and isinstance(widget.parent(), CodeEditor):
+            return widget.parent()
+        return None
+
+    def find_in_active_editor(self):
+        editor = self._get_active_editor()
+        if editor:
+            editor.show_search_widget()
+
+    def replace_in_active_editor(self):
+        editor = self._get_active_editor()
+        if editor:
+            editor.show_search_widget(replace=True)
+
+    def copy_xpath_in_active_editor(self):
+        editor = self._get_active_editor()
+        if editor:
+            editor.copy_xpath_to_clipboard()
+
+    def format_in_active_editor(self):
+        editor = self._get_active_editor()
+        if editor and not editor.isReadOnly():
+            editor.pretty_print_xml()
+
+    def handle_focus_change(self, old_widget, new_widget):
+        active_editor = self._get_active_editor()
+        is_editable = bool(active_editor and not active_editor.isReadOnly())
+
+        self.find_action.setEnabled(bool(active_editor))
+        self.replace_action.setEnabled(bool(active_editor))
+        self.copy_xpath_action.setEnabled(bool(active_editor))
+        self.format_action.setEnabled(is_editable)
+
+    def show_search_widget_for_active_editor(self, replace=False):
+        active_editor = self.focusWidget()
+        if isinstance(active_editor, CodeEditor):
+            search_widget = active_editor.search_widget
+            if search_widget.isVisible() and search_widget.replace_input.isVisible():
+                if replace:
+                    if search_widget.replace_input.hasFocus():
+                        search_widget.find_input.setFocus()
+                    else:
+                        search_widget.replace_input.setFocus()
+                else:
+                    search_widget.find_input.setFocus()
+            else:
+                active_editor.show_search_widget(replace)
 
     def update_xpath_label(self, xpath):
         self.xpath_label.setText(f"XPath: {xpath}")
