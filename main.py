@@ -7,6 +7,8 @@ if hasattr(os, 'add_dll_directory'):
     os.add_dll_directory(dll_path)
 
 import darkdetect
+import re
+from io import BytesIO
 from lxml import etree
 from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QTextEdit,
                                QPlainTextEdit, QPushButton, QSplitter, QFileDialog, QGroupBox, QMenu, QLabel,
@@ -350,46 +352,135 @@ class CodeEditor(QPlainTextEdit):
 
         self.setExtraSelections(extra_selections)
 
-    def _update_xpath(self):
+    def get_detailed_xpath(self, element):
+        root = element.getroottree().getroot()
+        nsmap = {v: k for k, v in root.nsmap.items()}
+
+        components = []
+        child = element
+        while child is not None:
+            parent = child.getparent()
+
+            qname = etree.QName(child)
+            prefix = nsmap.get(qname.namespace)
+            tag_name = qname.localname
+            prefixed_tag = f"{prefix}:{tag_name}" if prefix else tag_name
+
+            current_component = prefixed_tag
+            predicate = ""
+
+            if parent is not None: # Don't try to find siblings or attributes for the root element
+                # Find siblings with the exact same prefixed tag name
+                siblings_with_same_prefixed_tag = []
+                for sib in parent:
+                    sib_qname = etree.QName(sib)
+                    sib_prefix = nsmap.get(sib_qname.namespace)
+                    sib_prefixed_tag = f"{sib_prefix}:{sib_qname.localname}" if sib_prefix else sib_qname.localname
+                    if sib_prefixed_tag == prefixed_tag:
+                        siblings_with_same_prefixed_tag.append(sib)
+
+                # Always try to find a strong identifying attribute predicate, if available and useful.
+                identifying_attrs = ['id', 'ID', 'type', 'name', 'key']
+                strong_identifying_attr_predicate = ""
+                for attr_key, attr_value in child.attrib.items():
+                    attr_qname = etree.QName(attr_key)
+                    if attr_qname.localname in identifying_attrs:
+                        # Check if this attribute makes it unique among siblings (if multiple siblings exist)
+                        # Or if it's simply a strong identifier to make XPath more robust (even if unique by tag)
+                        is_unique_by_this_attr = True
+                        if len(siblings_with_same_prefixed_tag) > 1:
+                            for sib in siblings_with_same_prefixed_tag:
+                                if sib is not child and sib.get(attr_key) == attr_value:
+                                    is_unique_by_this_attr = False
+                                    break
+                        
+                        if is_unique_by_this_attr: # If unique or if only one sibling with this strong identifier
+                            attr_prefix = nsmap.get(attr_qname.namespace)
+                            attr_name = f"{attr_prefix}:{attr_qname.localname}" if attr_prefix else attr_qname.localname
+                            strong_identifying_attr_predicate = f"[@{attr_name}='{attr_value}']"
+                            break # Found a good identifying attribute, prioritize this one
+
+                if strong_identifying_attr_predicate:
+                    predicate = strong_identifying_attr_predicate
+                elif len(siblings_with_same_prefixed_tag) > 1:
+                    # If no strong identifying attribute or it's not unique by that, use index
+                    idx = siblings_with_same_prefixed_tag.index(child) + 1
+                    predicate = f"[{idx}]"
+            
+            current_component += predicate
+            components.append(current_component)
+            child = parent
+
+        components.reverse()
+        return '/' + '/'.join(components)
+
+    def find_element_at_line(self, root, line_number):
+        best_candidate = None
+        for elem in root.iter():
+            if hasattr(elem, 'sourceline') and elem.sourceline is not None:
+                if elem.sourceline > line_number:
+                    # Once we pass the target line, the last element seen is the best candidate
+                    return best_candidate
+                best_candidate = elem
+        return best_candidate
+
+    def _generate_xpath_at_cursor(self):
         try:
             text = self.toPlainText()
             if not text.strip():
-                self.xpath_changed.emit("")
-                return
+                return ""
 
-            # Use a placeholder to preserve the &#10; entity
             placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
             text_with_placeholder = text.replace("&#10;", placeholder)
 
+            # Use the 'recover' parser to handle potentially non-well-formed XML during editing
             parser = etree.XMLParser(recover=True)
-            root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
-            
-            tree = etree.ElementTree(root)
+            # Use BytesIO to handle encoding correctly
+            root = etree.parse(BytesIO(text_with_placeholder.encode('utf-8')), parser).getroot()
 
             cursor = self.textCursor()
             line_number = cursor.blockNumber() + 1
+            col_number = cursor.positionInBlock()
 
-            element = None
-            # This logic is non-functional without sourceline, but it prevents the app from crashing.
-            for elem in root.iter():
-                if hasattr(elem, 'sourceline') and elem.sourceline == line_number:
-                    element = elem
-                    break 
+            element = self.find_element_at_line(root, line_number)
+            if element is None:
+                return ""
 
-            if element is not None:
-                xpath = tree.getpath(element)
-                xpath = xpath.replace(placeholder, "&#10;")
-                self.xpath_changed.emit(xpath)
-            else:
-                self.xpath_changed.emit("") # Silently fails, but doesn't crash
+            xpath = self.get_detailed_xpath(element)
 
-        except etree.XMLSyntaxError as e:
+            cursor_line_text = cursor.block().text()
+            # Regex to find attribute name and its value
+            attr_regex = re.compile(r'([\w:-]+)\s*=\s*(["\'])(.*?)\2')
+            for match in attr_regex.finditer(cursor_line_text):
+                attr_name = match.group(1)
+                # Span for the attribute name
+                name_start, name_end = match.span(1)
+                # Span for the attribute value (inside the quotes)
+                val_start, val_end = match.span(3)
+
+                # Check if cursor is on the name OR the value
+                if (name_start <= col_number < name_end) or (val_start <= col_number < val_end):
+                    xpath += f'/@{attr_name}'
+                    break
+            
+            return xpath.replace(placeholder, "&#10;")
+
+        except etree.XMLSyntaxError:
+            # Re-raise to be caught by the calling function
+            raise
+        except Exception as e:
+            # Log other unexpected errors
+            print(f"XPath Generation Error (General): {e}")
+            return ""
+
+    def _update_xpath(self):
+        try:
+            xpath = self._generate_xpath_at_cursor()
+            self.xpath_changed.emit(xpath)
+        except etree.XMLSyntaxError:
             self.xpath_changed.emit("Invalid XML")
-            # Preserve error logging to console for future testing - necessary for Gemini.
-            print(f"XPath Update Error (XML Syntax): {e}")
         except Exception as e:
             self.xpath_changed.emit("")
-            # Preserve error logging to console for future testing - necessary for Gemini.
             print(f"XPath Update Error (General): {e}")
 
     def lineNumberAreaWidth(self):
@@ -445,32 +536,8 @@ class CodeEditor(QPlainTextEdit):
             
     def copy_xpath_to_clipboard(self):
         try:
-            text = self.toPlainText()
-            if not text.strip():
-                return
-
-            # Use a placeholder to preserve the &#10; entity
-            placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
-            text_with_placeholder = text.replace("&#10;", placeholder)
-
-            parser = etree.XMLParser(recover=True)
-            root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
-            
-            tree = etree.ElementTree(root)
-
-            cursor = self.textCursor()
-            line_number = cursor.blockNumber() + 1
-
-            element = None
-            # This logic is non-functional without sourceline, but it prevents the app from crashing.
-            for elem in root.iter():
-                if hasattr(elem, 'sourceline') and elem.sourceline == line_number:
-                    element = elem
-                    break
-
-            if element is not None:
-                xpath = tree.getpath(element)
-                xpath = xpath.replace(placeholder, "&#10;")
+            xpath = self._generate_xpath_at_cursor()
+            if xpath:
                 clipboard = QApplication.clipboard()
                 clipboard.setText(xpath)
                 main_window = self.window()
@@ -485,13 +552,11 @@ class CodeEditor(QPlainTextEdit):
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
                 main_window.statusBar().showMessage(f"Could not copy XPath: Invalid XML - {e}", 5000)
-            # Preserve error logging to console for future testing - necessary for Gemini.
             print(f"Copy XPath Error (XML Syntax): {e}")
         except Exception as e:
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
                 main_window.statusBar().showMessage(f"An unexpected error occurred while copying XPath: {e}", 5000)
-            # Preserve error logging to console for future testing - necessary for Gemini.
             print(f"Copy XPath Error (General): {e}")
 
     def show_context_menu(self, position):
