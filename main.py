@@ -251,6 +251,8 @@ class XmlHighlighter(QSyntaxHighlighter):
         return styles
 
     def highlightBlock(self, text):
+        if self.document() and self.document().characterCount() > 2000000:
+            return
         # Use get_tokens_unprocessed to get start index of each token
         for index, token_type, value in self.lexer.get_tokens_unprocessed(text):
             length = len(value)
@@ -329,6 +331,7 @@ class CodeEditor(QPlainTextEdit):
                  self.setExtraSelections(extra_selections)
                  return
             
+            match_count = 0
             while not document_cursor.isNull() and not document_cursor.atEnd():
                 document_cursor = self.document().find(regex, document_cursor)
                 if not document_cursor.isNull():
@@ -336,10 +339,14 @@ class CodeEditor(QPlainTextEdit):
                     selection.format.setBackground(QColor("#FFA500")) # Orange highlight for regex
                     selection.cursor = document_cursor
                     extra_selections.append(selection)
+                    match_count += 1
+                    if match_count >= 1000:
+                        break
                 else:
                     break
         else:
             flags = self.search_widget._get_find_flags()
+            match_count = 0
             while not document_cursor.isNull() and not document_cursor.atEnd():
                 document_cursor = self.document().find(text, document_cursor, flags)
                 if not document_cursor.isNull():
@@ -347,6 +354,9 @@ class CodeEditor(QPlainTextEdit):
                     selection.format.setBackground(QColor("yellow"))
                     selection.cursor = document_cursor
                     extra_selections.append(selection)
+                    match_count += 1
+                    if match_count >= 1000:
+                        break
                 else:
                     break
 
@@ -426,6 +436,9 @@ class CodeEditor(QPlainTextEdit):
 
     def _generate_xpath_at_cursor(self):
         try:
+            if self.document() and self.document().characterCount() > 2000000:
+                return "XPath disabled for large files (> 2000000 characters)"
+
             text = self.toPlainText()
             if not text.strip():
                 return ""
@@ -515,7 +528,7 @@ class CodeEditor(QPlainTextEdit):
             painter.fillRect(event.rect(), QColor("#2a2a2a"))
             pen_color = Qt.lightGray
         else:
-            painter.fillRect(event.rect(), Qt.lightGray)
+            painter.fillRect(event.rect(), QColor("#F0F0F0"))
             pen_color = Qt.black
 
         block = self.firstVisibleBlock()
