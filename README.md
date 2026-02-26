@@ -17,4 +17,3 @@ A simple, standalone desktop application for XSLT development and transformation
 ## Run from Source
 
 - run.bat to install dependencies and run
-- build_exe.bat to create unsigned executable
