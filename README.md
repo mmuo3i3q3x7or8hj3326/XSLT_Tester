@@ -1,4 +1,4 @@
-# XSLT_Tester (Created in [Gemini CLI](https://docs.cloud.google.com/gemini/docs/codeassist/gemini-cli))
+# XSLT Tester (Created in [Gemini CLI](https://docs.cloud.google.com/gemini/docs/codeassist/gemini-cli))
 
 A simple, standalone desktop application for XSLT development and transformation testing.
 
