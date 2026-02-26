@@ -6,7 +6,7 @@ A simple, standalone desktop application for XSLT development and transformation
 
 ## Features
 - XPath copy pasting
-- Right-click > Format: Pretty-printing for XML/XSLT.
+- Right-click > Format: Pretty-printing for XML/XSLT using [lxml](https://lxml.de/).
 - No word-wrapping for readability
 - Dark Theme if detects Windows Dark Mode
 

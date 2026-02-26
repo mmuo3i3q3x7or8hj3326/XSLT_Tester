@@ -21,6 +21,22 @@ from pygments.lexers import XmlLexer
 from pygments.styles import get_style_by_name
 from pygments.token import Token
 
+# --- Constants ---
+NEWLINE_PLACEHOLDER = "___GEMINI_NEWLINE_PLACEHOLDER___"
+MAX_LINE_LENGTH_FOR_AUTO_FORMAT = 100000
+MAX_HIGHLIGHT_CHARS = 2000000
+MAX_SEARCH_MATCHES = 1000
+MESSAGE_LENGTH = 10000
+
+# --- Helper Functions ---
+def format_xml_string(xml_str):
+    """Parses and pretty-prints an XML string, preserving specific entities."""
+    text_with_placeholder = xml_str.replace("&#10;", NEWLINE_PLACEHOLDER)
+    parser = etree.XMLParser(remove_blank_text=True, recover=True)
+    root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
+    formatted_xml = etree.tostring(root, pretty_print=True, encoding='unicode')
+    return formatted_xml.replace(NEWLINE_PLACEHOLDER, "&#10;")
+
 class SearchReplaceWidget(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
@@ -251,7 +267,7 @@ class XmlHighlighter(QSyntaxHighlighter):
         return styles
 
     def highlightBlock(self, text):
-        if self.document() and self.document().characterCount() > 2000000:
+        if self.document() and self.document().characterCount() > MAX_HIGHLIGHT_CHARS:
             return
         # Use get_tokens_unprocessed to get start index of each token
         for index, token_type, value in self.lexer.get_tokens_unprocessed(text):
@@ -340,7 +356,7 @@ class CodeEditor(QPlainTextEdit):
                     selection.cursor = document_cursor
                     extra_selections.append(selection)
                     match_count += 1
-                    if match_count >= 1000:
+                    if match_count >= MAX_SEARCH_MATCHES:
                         break
                 else:
                     break
@@ -355,7 +371,7 @@ class CodeEditor(QPlainTextEdit):
                     selection.cursor = document_cursor
                     extra_selections.append(selection)
                     match_count += 1
-                    if match_count >= 1000:
+                    if match_count >= MAX_SEARCH_MATCHES:
                         break
                 else:
                     break
@@ -436,15 +452,11 @@ class CodeEditor(QPlainTextEdit):
 
     def _generate_xpath_at_cursor(self):
         try:
-            if self.document() and self.document().characterCount() > 2000000:
-                return "XPath disabled for large files (> 2000000 characters)"
-
             text = self.toPlainText()
             if not text.strip():
                 return ""
 
-            placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
-            text_with_placeholder = text.replace("&#10;", placeholder)
+            text_with_placeholder = text.replace("&#10;", NEWLINE_PLACEHOLDER)
 
             # Use the 'recover' parser to handle potentially non-well-formed XML during editing
             parser = etree.XMLParser(recover=True)
@@ -476,7 +488,7 @@ class CodeEditor(QPlainTextEdit):
                     xpath += f'/@{attr_name}'
                     break
             
-            return xpath.replace(placeholder, "&#10;")
+            return xpath.replace(NEWLINE_PLACEHOLDER, "&#10;")
 
         except etree.XMLSyntaxError:
             # Re-raise to be caught by the calling function
@@ -555,21 +567,21 @@ class CodeEditor(QPlainTextEdit):
                 clipboard.setText(xpath)
                 main_window = self.window()
                 if hasattr(main_window, 'statusBar'):
-                    main_window.statusBar().showMessage("XPath copied to clipboard.", 2000)
+                    main_window.statusBar().showMessage("XPath copied to clipboard.", MESSAGE_LENGTH)
             else:
                 main_window = self.window()
                 if hasattr(main_window, 'statusBar'):
-                    main_window.statusBar().showMessage("No element found at this line.", 3000)
+                    main_window.statusBar().showMessage("No element found at this line.", MESSAGE_LENGTH)
 
         except etree.XMLSyntaxError as e:
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
-                main_window.statusBar().showMessage(f"Could not copy XPath: Invalid XML - {e}", 5000)
+                main_window.statusBar().showMessage(f"Could not copy XPath: Invalid XML - {e}", MESSAGE_LENGTH)
             print(f"Copy XPath Error (XML Syntax): {e}")
         except Exception as e:
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
-                main_window.statusBar().showMessage(f"An unexpected error occurred while copying XPath: {e}", 5000)
+                main_window.statusBar().showMessage(f"An unexpected error occurred while copying XPath: {e}", MESSAGE_LENGTH)
             print(f"Copy XPath Error (General): {e}")
 
     def show_context_menu(self, position):
@@ -616,19 +628,7 @@ class CodeEditor(QPlainTextEdit):
             if not original_text.strip():
                 return
 
-            # Use a placeholder to preserve the &#10; entity
-            placeholder = "___GEMINI_NEWLINE_PLACEHOLDER___"
-            text_with_placeholder = original_text.replace("&#10;", placeholder)
-
-            # Use lxml to parse and re-serialize with pretty printing
-            parser = etree.XMLParser(remove_blank_text=True, recover=True)
-            root = etree.fromstring(text_with_placeholder.encode('utf-8'), parser)
-
-            # Use lxml's built-in pretty printing
-            formatted_xml_with_placeholder = etree.tostring(root, pretty_print=True, encoding='unicode')
-
-            # Restore the &#10; entity
-            final_xml = formatted_xml_with_placeholder.replace(placeholder, "&#10;")
+            final_xml = format_xml_string(original_text)
 
             if original_text.strip() != final_xml.strip():
                 self.setPlainText(final_xml)
@@ -639,16 +639,16 @@ class CodeEditor(QPlainTextEdit):
 
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
-                main_window.statusBar().showMessage("Formatted successfully.", 2000)
+                main_window.statusBar().showMessage("Formatted successfully.", MESSAGE_LENGTH)
 
         except etree.XMLSyntaxError as e:
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
-                main_window.statusBar().showMessage(f"Formatting Error: Invalid XML - {e}", 5000)
+                main_window.statusBar().showMessage(f"Formatting Error: Invalid XML - {e}", MESSAGE_LENGTH)
         except Exception as e:
             main_window = self.window()
             if hasattr(main_window, 'statusBar'):
-                main_window.statusBar().showMessage(f"An unexpected error occurred: {e}", 5000)
+                main_window.statusBar().showMessage(f"An unexpected error occurred: {e}", MESSAGE_LENGTH)
 
 
 class MainWindow(QMainWindow):
@@ -861,33 +861,44 @@ class MainWindow(QMainWindow):
         
         save_action.setEnabled(modified)
 
-    def open_xml_file(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Open XML File", "", "XML Files (*.xml);;All Files (*)")
+    def _load_file(self, title, file_filter, editor, group, action_save, default_title):
+        filepath, _ = QFileDialog.getOpenFileName(self, title, "", file_filter)
         if filepath:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
-                self.xml_editor.setPlainText(content)
-                self.xml_file_path = filepath
-                self.xml_editor.document().setModified(False)
+                
+                formatted = False
+                if re.search(f'[^\\n]{{{MAX_LINE_LENGTH_FOR_AUTO_FORMAT + 1},}}', content):
+                    try:
+                        content = format_xml_string(content)
+                        formatted = True
+                    except Exception:
+                        pass
+
+                editor.setPlainText(content)
+                editor.document().setModified(False)
                 # Manually trigger the title update after loading a new file.
-                self.on_modification_changed(False, self.xml_group, "XML Input", self.xml_file_path, self.save_xml_action)
+                self.on_modification_changed(False, group, default_title, filepath, action_save)
+                
+                if formatted:
+                    self.statusBar().showMessage(f"Automatically Formatted: {os.path.basename(filepath)}", MESSAGE_LENGTH)
+                return filepath
             except Exception as e:
-                self.statusBar().showMessage(f"Error opening XML file: {e}", 5000)
+                self.statusBar().showMessage(f"Error opening file: {e}", MESSAGE_LENGTH)
+        return None
+
+    def open_xml_file(self):
+        filepath = self._load_file("Open XML File", "XML Files (*.xml);;All Files (*)", 
+                                   self.xml_editor, self.xml_group, self.save_xml_action, "XML Input")
+        if filepath:
+            self.xml_file_path = filepath
 
     def open_xslt_file(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Open XSLT File", "", "XSLT Files (*.xsl *.xslt);;All Files (*)")
+        filepath = self._load_file("Open XSLT File", "XSLT Files (*.xsl *.xslt);;All Files (*)", 
+                                   self.xslt_editor, self.xslt_group, self.save_xslt_action, "XSLT Stylesheet")
         if filepath:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                self.xslt_editor.setPlainText(content)
-                self.xslt_file_path = filepath
-                self.xslt_editor.document().setModified(False)
-                # Manually trigger the title update after loading a new file.
-                self.on_modification_changed(False, self.xslt_group, "XSLT Stylesheet", self.xslt_file_path, self.save_xslt_action)
-            except Exception as e:
-                self.statusBar().showMessage(f"Error opening XSLT file: {e}", 5000)
+            self.xslt_file_path = filepath
     
     def _save_file(self, file_path, editor):
         try:
@@ -895,11 +906,18 @@ class MainWindow(QMainWindow):
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             editor.document().setModified(False)
-            self.statusBar().showMessage(f"Saved to {file_path}", 2000)
+            self.statusBar().showMessage(f"Saved to {file_path}", MESSAGE_LENGTH)
             return True
         except Exception as e:
-            self.statusBar().showMessage(f"Error saving file: {e}", 5000)
+            self.statusBar().showMessage(f"Error saving file: {e}", MESSAGE_LENGTH)
             return False
+
+    def _save_file_as(self, title, file_filter, editor):
+        filepath, _ = QFileDialog.getSaveFileName(self, title, "", file_filter)
+        if filepath:
+            self._save_file(filepath, editor)
+            return filepath
+        return None
 
     def save_xml(self):
         if self.xml_file_path:
@@ -908,10 +926,9 @@ class MainWindow(QMainWindow):
             self.save_xml_as()
 
     def save_xml_as(self):
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save XML As", "", "XML Files (*.xml);;All Files (*)")
+        filepath = self._save_file_as("Save XML As", "XML Files (*.xml);;All Files (*)", self.xml_editor)
         if filepath:
             self.xml_file_path = filepath
-            self._save_file(self.xml_file_path, self.xml_editor)
 
     def save_xslt(self):
         if self.xslt_file_path:
@@ -920,10 +937,9 @@ class MainWindow(QMainWindow):
             self.save_xslt_as()
 
     def save_xslt_as(self):
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save XSLT As", "", "XSLT Files (*.xsl *.xslt);;All Files (*)")
+        filepath = self._save_file_as("Save XSLT As", "XSLT Files (*.xsl *.xslt);;All Files (*)", self.xslt_editor)
         if filepath:
             self.xslt_file_path = filepath
-            self._save_file(self.xslt_file_path, self.xslt_editor)
 
     def save_active_editor(self):
         if self.xml_editor.hasFocus():
@@ -936,7 +952,7 @@ class MainWindow(QMainWindow):
         xslt_input = self.xslt_editor.toPlainText()
 
         if not xml_input.strip() or not xslt_input.strip():
-            self.statusBar().showMessage("XML and XSLT inputs cannot be empty.", 3000)
+            self.statusBar().showMessage("XML and XSLT inputs cannot be empty.", MESSAGE_LENGTH)
             return
 
         try:
@@ -945,7 +961,7 @@ class MainWindow(QMainWindow):
                 document = proc.parse_xml(xml_text=xml_input)
                 
                 if not document:
-                    self.statusBar().showMessage("Error parsing XML.", 5000)
+                    self.statusBar().showMessage("Error parsing XML.", MESSAGE_LENGTH)
                     self.output_editor.setPlainText("Error parsing XML.")
                     return
                     
@@ -954,11 +970,11 @@ class MainWindow(QMainWindow):
                 
                 self.output_editor.setPlainText(output)
                 self.output_editor.pretty_print_xml()
-                self.statusBar().showMessage("Transformation successful.", 2000)
+                self.statusBar().showMessage("Transformation successful.", MESSAGE_LENGTH)
 
         except Exception as e:
             self.output_editor.setPlainText(str(e))
-            self.statusBar().showMessage("Transformation failed. See output for details.", 5000)
+            self.statusBar().showMessage("Transformation failed. See output for details.", MESSAGE_LENGTH)
 
 
 if __name__ == '__main__':
